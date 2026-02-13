@@ -9,7 +9,6 @@
 namespace Tina4;
 
 use ScssPhp\ScssPhp\Compiler;
-use ScssPhp\ScssPhp\Exception\CompilerException;
 use Twig\Error\LoaderError;
 
 /**
@@ -112,26 +111,16 @@ class Tina4Php extends Data
                 $dateB = strtotime($dateB);
             }
 
-            switch ($operator) {
-                case "==":
-                    return $dateA == $dateB;
-                    break;
-                case "!=":
-                    return $dateA != $dateB;
-                    break;
-                case ">":
-                    return $dateA > $dateB;
-                    break;
-                case "<":
-                    return $dateA < $dateB;
-                    break;
-                case ">=":
-                    return $dateA >= $dateB;
-                    break;
-                case "<=":
-                    return $dateA <= $dateB;
-                    break;
-            }
+            return match ($operator) {
+                "==" => $dateA == $dateB,
+                "!=" => $dateA != $dateB,
+                ">" => $dateA > $dateB,
+                "<" => $dateA < $dateB,
+                ">=" => $dateA >= $dateB,
+                "<=" => $dateA <= $dateB,
+                default => False,
+            };
+
         });
 
 
@@ -147,7 +136,7 @@ class Tina4Php extends Data
 
             try {
                 $this->initCSS();
-            } catch (CompilerException $e) {
+            } catch (\Exception $e) {
                 Debug::message("Could not create default.css twig in Tina4PHP Constructor", TINA4_LOG_ERROR);
             }
         }
@@ -345,7 +334,7 @@ class Tina4Php extends Data
     public function __toString(): string
     {
         if (!isset($_SERVER["REQUEST_METHOD"])) {
-            $_SERVER["REQUEST_METHOD"] = TINA4_GET;
+            $_SERVER["REQUEST_METHOD"] = "GET";
         }
 
         if (!isset($_SERVER["REQUEST_URI"])) {
@@ -398,6 +387,6 @@ class Tina4Php extends Data
      */
     public function getSwagger(string $title = "Tina4", string $description = "Swagger Documentation", string $version = "1.0.0"): string
     {
-        return (new Swagger($this->documentRoot, $title, $description, $version, $this->subFolder));
+        return (new Swagger($this->documentRoot, $title, $description, $this->subFolder));
     }
 }
