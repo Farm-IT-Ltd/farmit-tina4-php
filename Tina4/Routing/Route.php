@@ -105,7 +105,8 @@ class Route implements RouteCore
     public static function get(string $routePath, $function): Route
     {
         self::$method = TINA4_GET;
-        list(, $caller) = debug_backtrace(false);
+        $backtrace = debug_backtrace(false);
+        $caller = $backtrace[1] ?? $backtrace[0] ?? [];
 
         return self::add($routePath, $function, true, false, false, $caller);
     }
@@ -119,7 +120,8 @@ class Route implements RouteCore
     public static function put(string $routePath, $function): Route
     {
         self::$method = TINA4_PUT;
-        list(, $caller) = debug_backtrace(false);
+        $backtrace = debug_backtrace(false);
+        $caller = $backtrace[1] ?? $backtrace[0] ?? [];
 
         return self::add($routePath, $function, true, false, false, $caller);
     }
@@ -133,7 +135,8 @@ class Route implements RouteCore
     public static function post(string $routePath, $function): Route
     {
         self::$method = TINA4_POST;
-        list(, $caller) = debug_backtrace(false);
+        $backtrace = debug_backtrace(false);
+        $caller = $backtrace[1] ?? $backtrace[0] ?? [];
 
         return self::add($routePath, $function, true, false, false, $caller);
     }
@@ -147,7 +150,8 @@ class Route implements RouteCore
     public static function patch(string $routePath, $function): Route
     {
         self::$method = TINA4_PATCH;
-        list(, $caller) = debug_backtrace(false);
+        $backtrace = debug_backtrace(false);
+        $caller = $backtrace[1] ?? $backtrace[0] ?? [];
 
         return self::add($routePath, $function, true, false, false, $caller);
     }
@@ -161,7 +165,8 @@ class Route implements RouteCore
     public static function delete(string $routePath, $function): Route
     {
         self::$method = TINA4_DELETE;
-        list(, $caller) = debug_backtrace(false);
+        $backtrace = debug_backtrace(false);
+        $caller = $backtrace[1] ?? $backtrace[0] ?? [];
 
         return self::add($routePath, $function, true, false, false, $caller);
     }
@@ -175,7 +180,8 @@ class Route implements RouteCore
     public static function any(string $routePath, $function): Route
     {
         self::$method = TINA4_ANY;
-        list(, $caller) = debug_backtrace(false);
+        $backtrace = debug_backtrace(false);
+        $caller = $backtrace[1] ?? $backtrace[0] ?? [];
 
         return self::add($routePath, $function, true, false, false, $caller);
     }
