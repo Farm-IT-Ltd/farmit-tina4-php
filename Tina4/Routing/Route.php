@@ -81,7 +81,8 @@ class Route implements RouteCore
                 }
 
                 if (empty($caller)) {
-                    list(, $caller) = debug_backtrace(false);
+                    $backtrace = debug_backtrace(false);
+                    $caller = $backtrace[1] ?? $backtrace[0] ?? [];
                 }
 
                 $arrRoutes[] = ["routePath" => $routePathLoop, "method" => static::$method, "function" => $method, "class" => $class, "originalRoute" => $originalRoute,
