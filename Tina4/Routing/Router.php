@@ -573,6 +573,9 @@ class Router extends Data
                     } elseif (!in_array($route["method"], [\TINA4_POST, \TINA4_PUT, \TINA4_PATCH, \TINA4_DELETE], true)) {
                         $this->config->setAuthentication(null); //clear the auth
                         $result = $this->callHandler($route["class"], $route["function"], $inlineValues, $request, $response);
+                        if (!empty($_SERVER['STOREFRONT_TENANT'])) {
+                            error_log("ROUTER CALL: route={$route['routePath']} result_type=" . gettype($result) . " is_array=" . (is_array($result) ? 'yes' : 'no') . " httpCode=" . ($result['httpCode'] ?? 'N/A'));
+                        }
                     } elseif (!empty($this->config->getAuthentication())) {
                         if ($url === "/git/deploy" || $this->config->getAuthentication()->validToken(json_encode($_REQUEST))) {
                             $result = $this->callHandler($route["class"], $route["function"], $inlineValues, $request, $response);
