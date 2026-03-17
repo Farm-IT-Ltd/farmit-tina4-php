@@ -404,10 +404,17 @@ class Router extends Data
         $headers = $this->addCORS($headers); //Adding CORS headers on response
 
         //iterate through the routes
+        // Debug: log route matching for storefront
+        $debugRouteMatch = !empty($_SERVER['STOREFRONT_TENANT']);
+        if ($debugRouteMatch) {
+            error_log("ROUTER DEBUG: Looking for {$method} {$url} in " . count($arrRoutes) . " routes");
+        }
         foreach ($arrRoutes as $rid => $route) {
             $result = null;
-            //Debug::message("$this->GUID Method match {$method} -> {$route["method"]}", TINA4_LOG_DEBUG);
             if (($route["method"] === $method || $route["method"] === TINA4_ANY) && $this->matchPath($url, $route["routePath"], $route["ignoreRoutes"] ?? [])) {
+                if ($debugRouteMatch) {
+                    error_log("ROUTER DEBUG: MATCHED route #{$rid}: {$route['routePath']} (class: " . ($route['class'] ?? 'closure') . ")");
+                }
                 if (!empty($route["class"])) {
                     $reflectionClass = new \ReflectionClass($route["class"]);
                     $reflection = $reflectionClass->getMethod($route["function"]);
@@ -605,6 +612,9 @@ class Router extends Data
             }
         }
 
+        if ($debugRouteMatch) {
+            error_log("ROUTER DEBUG: NO route matched for {$method} {$url} — returning null (will 404)");
+        }
         return null;
     }
 
