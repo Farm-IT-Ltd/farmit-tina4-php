@@ -494,9 +494,12 @@ class Router extends Data
                 }
 
                 //Look to see if we are a secure route
-                // Skip auth for storefront routes — they handle their own auth via bearer tokens
-                $isStorefrontRoute = !empty($_SERVER['STOREFRONT_TENANT']) && strpos($route["routePath"], '/storefront/') === 0;
-                if (!$isStorefrontRoute && (empty($result) && isset($annotations["secure"]) || empty($result) && (isset($requestHeaders["Authorization"]) && stripos($requestHeaders["Authorization"], "bearer ") !== false))) {
+                $__hasSecure = isset($annotations["secure"]);
+                $__hasBearer = isset($requestHeaders["Authorization"]) && stripos($requestHeaders["Authorization"], "bearer ") !== false;
+                if (!empty($_SERVER['STOREFRONT_TENANT'])) {
+                    error_log("SFROUTER_DEBUG: auth_gate hasSecure=" . ($__hasSecure ? 'yes' : 'no') . " hasBearer=" . ($__hasBearer ? 'yes' : 'no') . " url={$url}");
+                }
+                if (empty($result) && $__hasSecure || empty($result) && $__hasBearer) {
                     if (isset($requestHeaders["Authorization"]) && $this->config->getAuthentication()->validToken(urldecode($requestHeaders["Authorization"]))) {
                         //call closure with & without params
                         $this->config->setAuthentication(null); //clear the auth
@@ -545,6 +548,9 @@ class Router extends Data
                         }
                     }
 
+                if (!empty($_SERVER['STOREFRONT_TENANT'])) {
+                    error_log("SFROUTER_DEBUG: post_auth result=" . ($result === null ? 'NULL' : gettype($result)) . " url={$url} hasFormToken=" . (isset($_REQUEST["formToken"]) ? 'yes' : 'no'));
+                }
                 if ($result === null) {
                     if (isset($_REQUEST["formToken"]) && in_array($route["method"], [\TINA4_POST, \TINA4_PUT, \TINA4_PATCH, \TINA4_DELETE], true)) {
                         if ($this->config->getAuthentication() === null) {
