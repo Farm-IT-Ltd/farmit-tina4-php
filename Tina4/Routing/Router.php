@@ -494,7 +494,9 @@ class Router extends Data
                 }
 
                 //Look to see if we are a secure route
-                if (empty($result) && isset($annotations["secure"]) || empty($result) && (isset($requestHeaders["Authorization"]) && stripos($requestHeaders["Authorization"], "bearer ") !== false)) {
+                // Skip auth for storefront routes — they handle their own auth via bearer tokens
+                $isStorefrontRoute = !empty($_SERVER['STOREFRONT_TENANT']) && strpos($route["routePath"], '/storefront/') === 0;
+                if (!$isStorefrontRoute && (empty($result) && isset($annotations["secure"]) || empty($result) && (isset($requestHeaders["Authorization"]) && stripos($requestHeaders["Authorization"], "bearer ") !== false))) {
                     if (isset($requestHeaders["Authorization"]) && $this->config->getAuthentication()->validToken(urldecode($requestHeaders["Authorization"]))) {
                         //call closure with & without params
                         $this->config->setAuthentication(null); //clear the auth
@@ -572,9 +574,12 @@ class Router extends Data
                         }
                     } elseif (!in_array($route["method"], [\TINA4_POST, \TINA4_PUT, \TINA4_PATCH, \TINA4_DELETE], true)) {
                         $this->config->setAuthentication(null); //clear the auth
+                        if (!empty($_SERVER['STOREFRONT_TENANT'])) {
+                            error_log("SFROUTER_DEBUG: calling_handler path={$route['routePath']}");
+                        }
                         $result = $this->callHandler($route["class"], $route["function"], $inlineValues, $request, $response);
                         if (!empty($_SERVER['STOREFRONT_TENANT'])) {
-                            error_log("ROUTER CALL: route={$route['routePath']} result_type=" . gettype($result) . " is_array=" . (is_array($result) ? 'yes' : 'no') . " httpCode=" . ($result['httpCode'] ?? 'N/A'));
+                            error_log("SFROUTER_DEBUG: handler_result type=" . gettype($result) . " httpCode=" . ($result['httpCode'] ?? 'N/A'));
                         }
                     } elseif (!empty($this->config->getAuthentication())) {
                         if ($url === "/git/deploy" || $this->config->getAuthentication()->validToken(json_encode($_REQUEST))) {
