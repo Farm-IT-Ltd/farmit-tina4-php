@@ -370,8 +370,14 @@ class Tina4Php extends Data
         if (TINA4_DEBUG) {
             $debugContent = DebugRender::render();
             if ($debugContent !== "") {
-                header("Content-Type: text/html");
-                $content = $debugContent . "\n" . $content;
+                // Only prepend debug HTML to HTML responses — don't corrupt JSON/XML API responses
+                $isApiResponse = $routerResponse !== null &&
+                    !empty($routerResponse->contentType) &&
+                    $routerResponse->contentType !== TEXT_HTML;
+                if (!$isApiResponse) {
+                    header("Content-Type: text/html");
+                    $content = $debugContent . "\n" . $content;
+                }
             }
         }
 
