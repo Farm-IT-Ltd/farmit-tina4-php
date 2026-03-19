@@ -503,12 +503,11 @@ class Router extends Data
 
                         $route["routePath"] = str_replace("/{id}", "", $route["routePath"]);
 
-                        if (isset($_REQUEST["formToken"]) && $route["method"] === TINA4_GET && $this->config->getAuthentication()->validToken($_REQUEST["formToken"]))
-                            // && $this->config->getAuthentication()->getPayLoad($_REQUEST["formToken"])["payload"] === $route["routePath"]) @todo fix this
-                        {
-                            //\Tina4\Debug::message("$this->GUID Matching secure ".$this->config->getAuthentication()->getPayLoad($_REQUEST["formToken"])["payload"]." ".$route["routePath"], TINA4_LOG_DEBUG);
+                        // Check formToken OR allow if CustomAuth says the request is valid
+                        // (e.g. XHR requests with X-Requested-With header)
+                        $tokenToCheck = $_REQUEST["formToken"] ?? '';
+                        if ($this->config->getAuthentication()->validToken($tokenToCheck)) {
                             $this->config->setAuthentication(null); //clear the auth
-
                             $result = $this->callHandler($route["class"], $route["function"], $inlineValues, $request, $response);
                         } else {
                             if ($route["method"] === TINA4_GET) {
