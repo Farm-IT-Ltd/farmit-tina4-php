@@ -404,17 +404,10 @@ class Router extends Data
         $headers = $this->addCORS($headers); //Adding CORS headers on response
 
         //iterate through the routes
-        // Debug: log route matching for storefront
-        $debugRouteMatch = !empty($_SERVER['STOREFRONT_TENANT']);
-        if ($debugRouteMatch) {
-            error_log("ROUTER DEBUG: Looking for {$method} {$url} in " . count($arrRoutes) . " routes");
-        }
         foreach ($arrRoutes as $rid => $route) {
             $result = null;
+            //Debug::message("$this->GUID Method match {$method} -> {$route["method"]}", TINA4_LOG_DEBUG);
             if (($route["method"] === $method || $route["method"] === TINA4_ANY) && $this->matchPath($url, $route["routePath"], $route["ignoreRoutes"] ?? [])) {
-                if ($debugRouteMatch) {
-                    error_log("ROUTER DEBUG: MATCHED route #{$rid}: {$route['routePath']} (class: " . ($route['class'] ?? 'closure') . ")");
-                }
                 if (!empty($route["class"])) {
                     $reflectionClass = new \ReflectionClass($route["class"]);
                     $reflection = $reflectionClass->getMethod($route["function"]);
@@ -494,12 +487,7 @@ class Router extends Data
                 }
 
                 //Look to see if we are a secure route
-                $__hasSecure = isset($annotations["secure"]);
-                $__hasBearer = isset($requestHeaders["Authorization"]) && stripos($requestHeaders["Authorization"], "bearer ") !== false;
-                if (!empty($_SERVER['STOREFRONT_TENANT'])) {
-                    error_log("SFROUTER_DEBUG: auth_gate hasSecure=" . ($__hasSecure ? 'yes' : 'no') . " hasBearer=" . ($__hasBearer ? 'yes' : 'no') . " url={$url}");
-                }
-                if (empty($result) && $__hasSecure || empty($result) && $__hasBearer) {
+                if (empty($result) && isset($annotations["secure"]) || empty($result) && (isset($requestHeaders["Authorization"]) && stripos($requestHeaders["Authorization"], "bearer ") !== false)) {
                     if (isset($requestHeaders["Authorization"]) && $this->config->getAuthentication()->validToken(urldecode($requestHeaders["Authorization"]))) {
                         //call closure with & without params
                         $this->config->setAuthentication(null); //clear the auth
@@ -548,9 +536,6 @@ class Router extends Data
                         }
                     }
 
-                if (!empty($_SERVER['STOREFRONT_TENANT'])) {
-                    error_log("SFROUTER_DEBUG: post_auth result=" . ($result === null ? 'NULL' : gettype($result)) . " url={$url} hasFormToken=" . (isset($_REQUEST["formToken"]) ? 'yes' : 'no'));
-                }
                 if ($result === null) {
                     if (isset($_REQUEST["formToken"]) && in_array($route["method"], [\TINA4_POST, \TINA4_PUT, \TINA4_PATCH, \TINA4_DELETE], true)) {
                         if ($this->config->getAuthentication() === null) {
@@ -580,13 +565,7 @@ class Router extends Data
                         }
                     } elseif (!in_array($route["method"], [\TINA4_POST, \TINA4_PUT, \TINA4_PATCH, \TINA4_DELETE], true)) {
                         $this->config->setAuthentication(null); //clear the auth
-                        if (!empty($_SERVER['STOREFRONT_TENANT'])) {
-                            error_log("SFROUTER_DEBUG: calling_handler path={$route['routePath']}");
-                        }
                         $result = $this->callHandler($route["class"], $route["function"], $inlineValues, $request, $response);
-                        if (!empty($_SERVER['STOREFRONT_TENANT'])) {
-                            error_log("SFROUTER_DEBUG: handler_result type=" . gettype($result) . " httpCode=" . ($result['httpCode'] ?? 'N/A'));
-                        }
                     } elseif (!empty($this->config->getAuthentication())) {
                         if ($url === "/git/deploy" || $this->config->getAuthentication()->validToken(json_encode($_REQUEST))) {
                             $result = $this->callHandler($route["class"], $route["function"], $inlineValues, $request, $response);
@@ -626,9 +605,6 @@ class Router extends Data
             }
         }
 
-        if ($debugRouteMatch) {
-            error_log("ROUTER DEBUG: NO route matched for {$method} {$url} — returning null (will 404)");
-        }
         return null;
     }
 
