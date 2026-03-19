@@ -343,6 +343,11 @@ class Tina4Php extends Data
 
         $routerResponse = (new Router())->resolveRoute($_SERVER["REQUEST_METHOD"], $_SERVER["REQUEST_URI"], $this->config);
 
+        // Debug: log what resolveRoute returned (single log line, no control flow changes)
+        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) || !empty($_SERVER['STOREFRONT_TENANT'])) {
+            error_log("TINA4_RESOLVE: url=" . ($_SERVER['REQUEST_URI'] ?? '') . " httpCode=" . ($routerResponse ? $routerResponse->httpCode : 'NULL') . " contentLen=" . ($routerResponse ? strlen($routerResponse->content) : 0) . " contentType=" . ($routerResponse ? ($routerResponse->contentType ?? 'none') : 'N/A'));
+        }
+
         $content = "";
         if ($routerResponse !== null) {
             if (!headers_sent()) {
