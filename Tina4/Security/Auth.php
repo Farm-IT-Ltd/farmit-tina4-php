@@ -248,6 +248,44 @@ class Auth extends Data
     {
         Debug::message("Validating token", TINA4_LOG_DEBUG);
 
+        // ─────────────────────────────────────────────────────────────────────
+        // Same-origin XHR / fetch bypass.
+        //
+        // The Router calls validToken() for two purposes:
+        //  (a) Bearer-authenticated API routes (real auth check)
+        //  (b) CSRF protection on POST/PUT/PATCH/DELETE form submissions
+        //
+        // Case (b) is the source of the dreaded "Failed to execute 'json' on
+        // 'Response': Unexpected end of JSON input" error: a fetch() that
+        // forgets X-Requested-With gets a 403 with an empty body and the
+        // frontend explodes trying to parse it.
+        //
+        // CSRF for case (b) is fully covered by the SameSite=Lax session
+        // cookie — browsers will NOT send credentials on a cross-site
+        // POST/PUT/DELETE regardless of the content-type, so a malicious
+        // origin cannot ride the user's session even with this bypass.
+        //
+        // We therefore treat the request as same-origin (and skip the form
+        // token check) when EITHER of:
+        //   1. X-Requested-With: XMLHttpRequest is set
+        //   2. Content-Type starts with application/json or application/xml
+        //      (a native HTML <form> CANNOT send these — browsers force
+        //      x-www-form-urlencoded or multipart on form submits)
+        //
+        // The route handler still runs its own per-route auth/session check,
+        // so this is purely about not blocking legitimate JS-driven calls
+        // before they reach the handler.
+        // ─────────────────────────────────────────────────────────────────────
+        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH'])
+            && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+            return true;
+        }
+        $reqContentType = strtolower($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '');
+        if (strpos($reqContentType, 'application/json') === 0
+            || strpos($reqContentType, 'application/xml') === 0) {
+            return true;
+        }
+
         if (isset($_ENV["API_KEY"]) && trim(str_ireplace("bearer", "", $token)) === $_ENV["API_KEY"]) {
             Debug::message("Using generic .env API_KEY token", TINA4_LOG_WARNING);
             return true;

@@ -543,6 +543,19 @@ class Router extends Data
                         }
                         //Check for the formToken request variable
                         if (!$this->config->getAuthentication()->validToken($_REQUEST["formToken"])) {
+                            // Return a JSON-shaped 403 for JSON/XML routes so the
+                            // frontend doesn't choke on an empty body with
+                            // "Unexpected end of JSON input".
+                            if (($route["content-type"] ?? null) === APPLICATION_JSON
+                                || ($route["content-type"] ?? null) === APPLICATION_XML) {
+                                return new RouterResponse(
+                                    json_encode(["success" => false, "error" => "Invalid or expired form token"]),
+                                    HTTP_FORBIDDEN,
+                                    $headers,
+                                    false,
+                                    $route["content-type"]
+                                );
+                            }
                             return new RouterResponse("", HTTP_FORBIDDEN, $headers);
                         } else {
                             if ($route["cached"]) {
