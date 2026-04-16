@@ -23,6 +23,7 @@ class Request extends \StdClass
     public $headers = null;
     public $rawRequest = null;
     public $security = null;
+    public $ip = null;
 
     /**
      * Filter value
@@ -133,6 +134,18 @@ class Request extends \StdClass
                 $this->data->{$key} = $this->filterValue($value);
             }
         }
+
+        // Resolve client IP — respects reverse proxy headers
+        $forwardedFor = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? '';
+        if (!empty($forwardedFor)) {
+            $this->ip = trim(explode(',', $forwardedFor)[0]);
+        } elseif (!empty($_SERVER['HTTP_X_REAL_IP'])) {
+            $this->ip = $_SERVER['HTTP_X_REAL_IP'];
+        } elseif (!empty($_SERVER['REMOTE_ADDR'])) {
+            $this->ip = $_SERVER['REMOTE_ADDR'];
+        } else {
+            $this->ip = 'unknown';
+        }
     }
 
     /**
@@ -152,5 +165,23 @@ class Request extends \StdClass
     public function asArray()
     {
         return json_decode(json_encode($this->data), true, 512);
+    }
+
+    /**
+     * Extracts the Bearer token from the Authorization header.
+     * Returns null if no valid Bearer token is present.
+     */
+    public function bearerToken(): ?string
+    {
+        $authHeader = $this->headers['authorization']
+            ?? $this->headers['Authorization']
+            ?? $_SERVER['HTTP_AUTHORIZATION']
+            ?? '';
+
+        if (stripos($authHeader, 'Bearer ') === 0) {
+            return substr($authHeader, 7);
+        }
+
+        return null;
     }
 }
