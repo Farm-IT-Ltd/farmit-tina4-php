@@ -1,11 +1,12 @@
 {
-    "name": "tina4stack/tina4php",
+    "name": "farmit/tina4php",
     "description": "Tina4 PHP",
     "license": "MIT",
     "autoload": {
         "files": [
             "Tina4/Functions.php",
-            "Tina4/Initialize.php"
+            "Tina4/Initialize.php",
+            "FarmIT/aliases.php"
         ],
         "classmap": [
             "Helpers/",
@@ -42,18 +43,18 @@
         "phpfastcache/phpfastcache": "^8.0.5",
         "coyl/git": "^0.1.7",
         "scssphp/scssphp": "^2.0.1",
-        "tina4stack/tina4php-debug": "^2.0",
-        "tina4stack/tina4php-shape": "^2.0",
-        "tina4stack/tina4php-env": "^2.0",
-        "tina4stack/tina4php-database": "^2.0",
-        "tina4stack/tina4php-orm": "^2.0",
+        "farmit/tina4php-debug": "^2.0",
+        "farmit/tina4php-shape": "^2.0",
+        "farmit/tina4php-env": "^2.0",
+        "farmit/tina4php-database": "^2.0",
+        "farmit/tina4php-orm": "^2.0",
         "ext-openssl": "*",
         "ext-libxml": "*",
         "ext-json": "*",
         "ext-curl": "*",
         "ext-fileinfo": "*",
         "ext-zip": "*",
-        "tina4stack/tina4php-core": "^2.0"
+        "farmit/tina4php-core": "^2.0"
     },
     "scripts": {
         "tina4": "@php bin/tina4",
@@ -80,8 +81,8 @@
         "roave/security-advisories": "dev-latest",
         "phpunit/phpunit": "^9",
         "overtrue/phplint": "^2.0",
-        "tina4stack/tina4php-sqlite3": "^2.0",
+        "farmit/tina4php-sqlite3": "^2.0",
         "phpmetrics/phpmetrics": "^2.8",
-        "tina4stack/tina4php-reports": "dev-main"
+        "farmit/tina4php-reports": "dev-main"
     }
 }
