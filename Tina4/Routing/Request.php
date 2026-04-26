@@ -135,6 +135,22 @@ class Request extends \StdClass
             }
         }
 
+        // Enforce upload size limit (env TINA4_MAX_UPLOAD_SIZE in bytes, default 0 = unlimited)
+        $maxUpload = (int)($_ENV['TINA4_MAX_UPLOAD_SIZE'] ?? 0);
+        if ($maxUpload > 0 && !empty($_FILES)) {
+            foreach ($_FILES as $fileKey => $fileInfo) {
+                $sizes = is_array($fileInfo['size']) ? $fileInfo['size'] : [$fileInfo['size']];
+                foreach ($sizes as $size) {
+                    if ($size > $maxUpload) {
+                        Debug::message("Upload '{$fileKey}' exceeds TINA4_MAX_UPLOAD_SIZE ({$maxUpload} bytes)", TINA4_LOG_WARNING);
+                        unset($_FILES[$fileKey]);
+                        break;
+                    }
+                }
+            }
+            $this->files = !empty($_FILES) ? $_FILES : null;
+        }
+
         // Resolve client IP — respects reverse proxy headers
         $forwardedFor = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? '';
         if (!empty($forwardedFor)) {
@@ -146,6 +162,93 @@ class Request extends \StdClass
         } else {
             $this->ip = 'unknown';
         }
+    }
+
+    /**
+     * Factory method to create a Request from the current PHP globals.
+     * Useful in middleware, services, or anywhere you need a Request
+     * without the Router having built one for you.
+     *
+     * @return static
+     */
+    public static function create(): self
+    {
+        return new self(@file_get_contents('php://input'));
+    }
+
+    /**
+     * Does the client want a JSON response?
+     * Checks the Accept header for application/json.
+     */
+    public function wantsJson(): bool
+    {
+        $accept = $this->headers['accept'] ?? $this->headers['Accept'] ?? '';
+        return stripos($accept, 'application/json') !== false;
+    }
+
+    /**
+     * Is the request body JSON?
+     * Checks the Content-Type header.
+     */
+    public function isJson(): bool
+    {
+        $ct = $this->headers['content-type'] ?? $this->headers['Content-Type']
+            ?? $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
+        return stripos($ct, 'application/json') !== false;
+    }
+
+    /**
+     * Get a value from the request body (POST data or JSON body).
+     * Supports dot notation for nested JSON: input('user.name')
+     *
+     * @param string $key
+     * @param mixed $default
+     * @return mixed
+     */
+    public function input(string $key, $default = null)
+    {
+        $segments = explode('.', $key);
+        $value = $this->data;
+
+        foreach ($segments as $segment) {
+            if (is_object($value) && isset($value->{$segment})) {
+                $value = $value->{$segment};
+            } elseif (is_array($value) && isset($value[$segment])) {
+                $value = $value[$segment];
+            } else {
+                return $default;
+            }
+        }
+
+        return $value;
+    }
+
+    /**
+     * Get a named inline route parameter.
+     * Route::get('/users/{id}', ...) => $request->param('id')
+     *
+     * @param string $name Parameter name (without braces)
+     * @param mixed $default
+     * @return mixed
+     */
+    public function param(string $name, $default = null)
+    {
+        if (is_array($this->inlineParams) && isset($this->inlineParams[$name])) {
+            return $this->inlineParams[$name];
+        }
+        return $default;
+    }
+
+    /**
+     * Get a query string parameter (?key=value).
+     *
+     * @param string $key
+     * @param mixed $default
+     * @return mixed
+     */
+    public function queryParam(string $key, $default = null)
+    {
+        return $_GET[$key] ?? $default;
     }
 
     /**

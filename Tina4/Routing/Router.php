@@ -23,7 +23,7 @@ class Router extends Data
     /**
      * @var string Used to check if path matches route path in matchPath()
      */
-    protected $pathMatchExpression = "/([a-zA-Z0-9\\%\\ \\! \\-\\}\\{\\.\\_]*)\\//";
+    protected $pathMatchExpression = "/([a-zA-Z0-9\\%\\ \\! \\-\\}\\{\\.\\_\\:]*)\\//";
     private $params = [];
     /**
      * @var Config|null
@@ -458,6 +458,14 @@ class Router extends Data
                 }
 
 
+                // @no-auth annotation explicitly marks a route as public,
+                // overriding any secure() chain or @secure annotation
+                if (isset($annotations["no-auth"]) || !empty($route["noAuth"])) {
+                    $route["secure"] = false;
+                    unset($annotations["secure"]);
+                    unset($annotations["security"]);
+                }
+
                 if (isset($annotations["secure"]) || isset($annotations["security"])) {
                     $request->security = isset($annotations["secure"]) ? explode(",", $annotations["secure"][0]) : explode(",", $annotations["security"][0]);
                     if (empty($request->security[0])) {
@@ -725,7 +733,31 @@ class Router extends Data
         if (count($matchesPath[1]) === count($matchesRoute[1])) {
             foreach ($matchesPath[1] as $rid => $matchPath) {
                 if ($matchPath !== "" && !empty($matchesRoute[1][$rid]) && strpos($matchesRoute[1][$rid], "{") !== false) {
-                    $variables[] = urldecode($matchPath);
+                    $decoded = urldecode($matchPath);
+                    // Route param type casting: {id:int}, {price:float}, {active:bool}
+                    $routeSegment = $matchesRoute[1][$rid];
+                    if (preg_match('/\{[^}]+:(int|float|bool)\}/', $routeSegment, $typeMatch)) {
+                        switch ($typeMatch[1]) {
+                            case 'int':
+                                if (!ctype_digit(ltrim($decoded, '-'))) {
+                                    $matching = false;
+                                    break 2;
+                                }
+                                $decoded = (int)$decoded;
+                                break;
+                            case 'float':
+                                if (!is_numeric($decoded)) {
+                                    $matching = false;
+                                    break 2;
+                                }
+                                $decoded = (float)$decoded;
+                                break;
+                            case 'bool':
+                                $decoded = in_array(strtolower($decoded), ['1', 'true', 'yes'], true);
+                                break;
+                        }
+                    }
+                    $variables[] = $decoded;
                 } elseif (!empty($matchesRoute[1][$rid])) {
                     if ($matchPath !== $matchesRoute[1][$rid]) {
                         $matching = false;

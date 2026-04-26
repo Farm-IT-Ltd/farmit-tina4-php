@@ -382,6 +382,37 @@ class Auth extends Data
     }
 
     /**
+     * Decode a JWT payload WITHOUT signature verification.
+     *
+     * Useful for reading claims from third-party tokens (e.g. Shopify id_tokens,
+     * federated IdP tokens) where you have no access to the signing key but need
+     * to inspect the payload for routing or display purposes.
+     *
+     * WARNING: The returned payload is NOT authenticated. Never use this for
+     * authorization decisions — use getPayLoad() or validToken() instead.
+     *
+     * @param string $token Raw JWT string (with or without "Bearer " prefix)
+     * @return array The decoded payload, or empty array on malformed input
+     */
+    public static function getPayloadWithoutValidation(string $token): array
+    {
+        $token = trim(str_ireplace('bearer', '', $token));
+
+        $parts = explode('.', $token);
+        if (count($parts) !== 3) {
+            return [];
+        }
+
+        $payload = base64_decode(strtr($parts[1], '-_', '+/'), true);
+        if ($payload === false) {
+            return [];
+        }
+
+        $decoded = json_decode($payload, true);
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
      * Validate the request
      * @param $request
      * @param string|null $lastPath
