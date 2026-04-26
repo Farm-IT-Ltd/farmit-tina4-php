@@ -240,6 +240,22 @@ class Route implements RouteCore
     }
 
     /**
+     * Mark the last registered route as NOT requiring authentication.
+     * Useful when a controller or module sets secure(true) globally
+     * but specific routes (e.g. health checks, public APIs) must be open.
+     *
+     * Usage: Route::get('/api/health', fn() => ...)->noAuth();
+     */
+    public static function noAuth(): Route
+    {
+        global $arrRoutes;
+        $arrRoutes[count($arrRoutes) - 1]["secure"] = false;
+        $arrRoutes[count($arrRoutes) - 1]["noAuth"] = true;
+
+        return new static;
+    }
+
+    /**
      * Add caller
      */
     public static function caller($caller=null): Route
