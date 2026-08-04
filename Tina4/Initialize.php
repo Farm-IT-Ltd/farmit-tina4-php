@@ -157,6 +157,15 @@ if (!defined("TINA4_CACHE_ON")) {
     define("TINA4_CACHE_ON", false);
 }
 
+//Shared, cross-process cache of the route-discovery scan result (which routes exist, not their
+//responses - see Route::cache()/Route::noCache() for response caching, a separate concern).
+//Independent of TINA4_CACHE_ON (which defaults off and gates response caching); this defaults on
+//because it is a pure performance layer with no behavioural effect. Set to false to force every
+//request to rescan/reflect, e.g. while diagnosing a route-discovery bug.
+if (!defined("TINA4_ROUTE_DISCOVERY_CACHE")) {
+    define("TINA4_ROUTE_DISCOVERY_CACHE", true);
+}
+
 if (!defined("TINA4_SINGLE_USE_TOKENS")) {
     define("TINA4_SINGLE_USE_TOKENS", true);
 }
@@ -458,6 +467,36 @@ if (!$alreadyLoaded) {
         }
     }
 
+    if (!function_exists("tina4BuildRouteCallable")) {
+        /**
+         * Builds the callable actually handed to Get::add()/Post::add()/etc, applying the
+         * #[Template] wrapper when one was declared. Factored out so both the live attribute
+         * scan (registerRouteFromAttributes below) and the cached route-discovery replay (see
+         * the discovery loop further down) build an identical callable shape from the same
+         * primitive inputs, instead of duplicating the closure-construction logic.
+         *
+         * @param array|string $originalCallable [$class, $method] for controller methods, or a
+         *                                        plain function name for flat route functions
+         * @param string|null $templateName Twig template to render an array result through, or
+         *                                   null when no #[Template] attribute was present
+         * @return array|string|\Closure
+         */
+        function tina4BuildRouteCallable($originalCallable, ?string $templateName)
+        {
+            if ($templateName === null) {
+                return $originalCallable;
+            }
+
+            return function (...$args) use ($originalCallable, $templateName) {
+                $result = call_user_func_array($originalCallable, $args);
+                if (is_array($result)) {
+                    return ["content" => \Tina4\renderTemplate($templateName, $result), "httpCode" => 200, "contentType" => TEXT_HTML];
+                }
+                return $result;
+            };
+        }
+    }
+
     if (!function_exists("registerRouteFromAttributes")) {
         // ── Helper that does the actual registration ─────────────────────────────
         function registerRouteFromAttributes(ReflectionFunctionAbstract $ref, string $prefix = ''): void
@@ -478,79 +517,205 @@ if (!$alreadyLoaded) {
 
             $originalCallable = $ref instanceof ReflectionMethod ? [$ref->class, $ref->name] : $ref->name;
 
-            $callable = $originalCallable;
+            $templateName = null;
             if ($templateAttr) {
                 $templateInstance = $templateAttr->newInstance();
                 $templateName = $templateInstance->twigFile;  // Use 'twigFile' to match your class property
-
-                $callable = function (...$args) use ($originalCallable, $templateName) {
-                    $result = call_user_func_array($originalCallable, $args);
-                    if (is_array($result)) {
-                        return ["content" => \Tina4\renderTemplate($templateName, $result), "httpCode" => 200, "contentType" => TEXT_HTML];
-                    }
-                    return $result;
-                };
             }
+
+            $callable = tina4BuildRouteCallable($originalCallable, $templateName);
+
+            // Populated only while the discovery loop below is running a fresh scan, so it can
+            // cache exactly what got registered and replay it next time without re-scanning.
+            global $tina4RouteDiscoveryRecipe;
 
             foreach ($routeAttrs as $attr) {
                 $instance = $attr->newInstance();
 
                 $path = $prefix . $instance->path;
 
-                match ($attr->getName()) {
-                    Get::class => \Tina4\Get::add($path, $callable),
-                    Post::class => \Tina4\Post::add($path, $callable),
-                    Put::class => \Tina4\Put::add($path, $callable),
-                    Patch::class => \Tina4\Patch::add($path, $callable),
-                    Delete::class => \Tina4\Delete::add($path, $callable),
-                    Any::class => \Tina4\Any::add($path, $callable),
+                $routeClassName = match ($attr->getName()) {
+                    Get::class => 'Get',
+                    Post::class => 'Post',
+                    Put::class => 'Put',
+                    Patch::class => 'Patch',
+                    Delete::class => 'Delete',
+                    Any::class => 'Any',
                     default => null,
                 };
+
+                if ($routeClassName === null) {
+                    continue;
+                }
+
+                match ($routeClassName) {
+                    'Get' => \Tina4\Get::add($path, $callable),
+                    'Post' => \Tina4\Post::add($path, $callable),
+                    'Put' => \Tina4\Put::add($path, $callable),
+                    'Patch' => \Tina4\Patch::add($path, $callable),
+                    'Delete' => \Tina4\Delete::add($path, $callable),
+                    'Any' => \Tina4\Any::add($path, $callable),
+                };
+
+                if (is_array($tina4RouteDiscoveryRecipe)) {
+                    $tina4RouteDiscoveryRecipe[] = [
+                        "routeClass" => $routeClassName,
+                        "path" => $path,
+                        "callable" => $originalCallable,
+                        "template" => $templateName,
+                    ];
+                }
             }
+        }
+    }
+
+    if (!function_exists("tina4DiscoverRoutes")) {
+        /**
+         * Runs the attribute-based route discovery scan, wrapped with a shared, cross-process
+         * cache of its result (see incident notes at the call site below). Extracted into a
+         * named, re-invokable function (rather than left as inline top-level script code) purely
+         * so this can be exercised more than once within a single process - both by a real
+         * PHP-FPM worker serving several requests, and by tests proving the cache actually skips
+         * the scan on a hit. Behaviour is unchanged from the original inline version otherwise.
+         *
+         * @param string $routeFolder Directory tree to walk for attribute-routed classes/functions
+         * @param bool|null $cacheEnabledOverride Forces the cache on/off regardless of the
+         *        TINA4_DEBUG/TINA4_ROUTE_DISCOVERY_CACHE constants. Exists so tests can exercise
+         *        the cached path deterministically without needing a second PHP process just to
+         *        get a different TINA4_DEBUG constant value (constants can't be redefined once
+         *        set). Leave null in real bootstrap code - that's what makes the constants apply.
+         */
+        function tina4DiscoverRoutes(string $routeFolder, ?bool $cacheEnabledOverride = null): void
+        {
+            // Single directory walk, shared by both the cache-key signature and (on a miss) the
+            // require loop below - this incident's O(N^2) cost was never the directory walk
+            // itself, it was reflecting over every declared class/function for every file just to
+            // test getFileName() match.
+            $routeDiscoveryFiles = [];
+            $routeDiscoverySignatureParts = [];
+            foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($routeFolder)) as $file) {
+                if ($file->getExtension() !== 'php') continue;
+
+                $realPath = $file->getRealPath();
+                $routeDiscoveryFiles[] = $realPath;
+                //mtime (not content hash) so the signature stays cheap to compute on every
+                //request - identical trade-off to how OPcache/Composer detect changed files.
+                $routeDiscoverySignatureParts[] = $realPath . ':' . $file->getMTime();
+            }
+            //Sort a copy of the signature only - iteration order for require_once below doesn't
+            //affect correctness (route registration order only depends on attribute scan order
+            //per file), but an unsorted, filesystem-order-dependent signature would cause spurious
+            //cache misses across platforms/reruns where directory order isn't guaranteed stable.
+            sort($routeDiscoverySignatureParts);
+            $routeDiscoveryCacheKey = "tina4_route_discovery_" . hash('sha256', implode('|', $routeDiscoverySignatureParts));
+
+            //Debug mode always rescans and never trusts/writes the cache - exactly like Twig
+            //templates recompiling on every request in TINA4_DEBUG - so local dev sees route
+            //changes immediately with no manual cache-bust step.
+            $routeDiscoveryCacheEnabled = $cacheEnabledOverride ?? (
+                (!defined("TINA4_DEBUG") || TINA4_DEBUG !== true)
+                && defined("TINA4_ROUTE_DISCOVERY_CACHE") && TINA4_ROUTE_DISCOVERY_CACHE === true
+            );
+
+            $tina4RouteDiscoveryCacheStore = null;
+            $cachedRouteDiscoveryRecipe = null;
+
+            if ($routeDiscoveryCacheEnabled) {
+                global $cache;
+                if (empty($cache)) {
+                    createCache();
+                }
+                $tina4RouteDiscoveryCacheStore = new \Tina4\Cache();
+                $cachedRouteDiscoveryRecipe = $tina4RouteDiscoveryCacheStore->get($routeDiscoveryCacheKey);
+            }
+
+            global $tina4RouteDiscoveryRecipe;
+
+            if (is_array($cachedRouteDiscoveryRecipe)) {
+                //Cache hit - skip the expensive scan entirely. Files still need to be required so
+                //their classes/functions exist for the callables replayed below to actually work.
+                foreach ($routeDiscoveryFiles as $routeDiscoveryFilePath) {
+                    require_once $routeDiscoveryFilePath;
+                }
+
+                $tina4RouteDiscoveryRecipe = null; // not scanning, registerRouteFromAttributes() is not called on this path
+
+                foreach ($cachedRouteDiscoveryRecipe as $recipeEntry) {
+                    $callable = tina4BuildRouteCallable($recipeEntry["callable"], $recipeEntry["template"]);
+
+                    match ($recipeEntry["routeClass"]) {
+                        'Get' => \Tina4\Get::add($recipeEntry["path"], $callable),
+                        'Post' => \Tina4\Post::add($recipeEntry["path"], $callable),
+                        'Put' => \Tina4\Put::add($recipeEntry["path"], $callable),
+                        'Patch' => \Tina4\Patch::add($recipeEntry["path"], $callable),
+                        'Delete' => \Tina4\Delete::add($recipeEntry["path"], $callable),
+                        'Any' => \Tina4\Any::add($recipeEntry["path"], $callable),
+                        default => null,
+                    };
+                }
+            } else {
+                //Cache miss (or cache disabled/bypassed) - run the exact same scan as before, and
+                //record what registerRouteFromAttributes() registers so it can be replayed without
+                //rescanning next time this signature (this deploy's file state) is seen again.
+                $tina4RouteDiscoveryRecipe = [];
+
+                //Observability counter, not a test seam: counts how many times the expensive scan
+                //actually ran. On a healthy deployment with the cache enabled this should settle
+                //at 1 shortly after a deploy and stay flat - if it keeps climbing, the cache isn't
+                //holding (e.g. backend eviction, or file mtimes churning) and is worth alerting on.
+                global $tina4RouteDiscoveryScanCount;
+                $tina4RouteDiscoveryScanCount = ($tina4RouteDiscoveryScanCount ?? 0) + 1;
+
+                foreach ($routeDiscoveryFiles as $routeDiscoveryFilePath) {
+                    require_once $routeDiscoveryFilePath;
+
+                    // ── Class methods (controllers) ─────────────────────────────────────
+                    foreach (get_declared_classes() as $class) {
+                        try {
+                            $refClass = new ReflectionClass($class);
+                        } catch (ReflectionException $e) {
+                            continue;
+                        }
+
+                        // Skip if this class wasn't in the one we just required
+                        if ($refClass->getFileName() !== $routeDiscoveryFilePath) continue;
+
+                        $prefix = '';
+                        foreach ($refClass->getAttributes(Prefix::class) as $attr) {
+                            $prefix = $attr->newInstance()->prefix;
+                        }
+
+                        foreach ($refClass->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+                            registerRouteFromAttributes($method, $prefix);
+                        }
+                    }
+
+                    // ── Global functions (flat Python style) ─────────────────────────────
+                    foreach (get_defined_functions()['user'] as $func) {
+                        try {
+                            $refFunc = new ReflectionFunction($func);
+                        } catch (ReflectionException $e) {
+                            continue;
+                        }
+                        if ($refFunc->getFileName() !== $routeDiscoveryFilePath) continue;
+
+                        registerRouteFromAttributes($refFunc);
+                    }
+                }
+
+                if ($routeDiscoveryCacheEnabled && $tina4RouteDiscoveryCacheStore !== null) {
+                    //TTL is a safety-net eviction only - correctness comes from the
+                    //signature-derived key, since an unchanged signature means an unchanged result.
+                    $tina4RouteDiscoveryCacheStore->set($routeDiscoveryCacheKey, $tina4RouteDiscoveryRecipe, 86400);
+                }
+            }
+
+            $tina4RouteDiscoveryRecipe = null;
         }
     }
 
     $routeFolder = TINA4_DOCUMENT_ROOT . 'src';
-
-    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($routeFolder)) as $file) {
-        if ($file->getExtension() !== 'php') continue;
-
-        require_once $file->getRealPath();
-
-        // ── Class methods (controllers) ─────────────────────────────────────
-        foreach (get_declared_classes() as $class) {
-            try {
-                $refClass = new ReflectionClass($class);
-            } catch (ReflectionException $e) {
-                continue;
-            }
-
-            // Skip if this class wasn't in the one we just required
-            if ($refClass->getFileName() !== $file->getRealPath()) continue;
-
-            $prefix = '';
-            foreach ($refClass->getAttributes(Prefix::class) as $attr) {
-                $prefix = $attr->newInstance()->prefix;
-            }
-
-            foreach ($refClass->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
-                registerRouteFromAttributes($method, $prefix);
-            }
-        }
-
-        // ── Global functions (flat Python style) ─────────────────────────────
-        foreach (get_defined_functions()['user'] as $func) {
-            try {
-                $refFunc = new ReflectionFunction($func);
-            } catch (ReflectionException $e) {
-                continue;
-            }
-            if ($refFunc->getFileName() !== $file->getRealPath()) continue;
-
-            registerRouteFromAttributes($refFunc);
-        }
-    }
-
+    tina4DiscoverRoutes($routeFolder);
 
     global $arrRoutes, $arrRouteIndex;
     $arrRouteIndex = [];
