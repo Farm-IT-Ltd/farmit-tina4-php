@@ -351,7 +351,8 @@ class Tina4Php extends Data
         $content = "";
         if ($routerResponse !== null) {
             if (!headers_sent()) {
-                foreach ($routerResponse->headers as $header) {
+                foreach ($routerResponse->headers as $headerName => $header) {
+                    $header = self::formatHeaderLine($headerName, $header);
                     if ($routerResponse->httpCode !== HTTP_OK && strpos($header, "FreshToken") !== false) {
                         continue;
                     }
@@ -359,7 +360,7 @@ class Tina4Php extends Data
                 }
             }
             http_response_code($routerResponse->httpCode);
-            if ($routerResponse->content === "") {
+            if (self::shouldRenderErrorTemplate($routerResponse->content, $routerResponse->httpCode)) {
                 //try give back a response based on the error code - first templates then public
                 $content = Utilities::renderErrorTemplate($routerResponse->httpCode);
             } else {
@@ -399,5 +400,49 @@ class Tina4Php extends Data
     public function getSwagger(string $title = "Tina4", string $description = "Swagger Documentation", string $version = "1.0.0"): string
     {
         return (new Swagger($this->documentRoot, $title, $description, $this->subFolder));
+    }
+
+    /**
+     * Formats one entry of a RouterResponse::$headers array into a valid
+     * "Name: Value" line suitable for PHP's header().
+     *
+     * customHeaders is commonly passed as an associative array (e.g.
+     * ['Location' => '/some/path'], matching Response::redirect()'s own
+     * documented shape), but that array gets merged with plain indexed
+     * "Name: Value" string entries (CORS/X-Headers) elsewhere in
+     * Router::handleRoutes(), producing a mixed array. Iterating that array
+     * by value alone silently drops the header name for the associative
+     * entries -- header('/some/path') is not a valid header and PHP cannot
+     * send it. Reconstruct "Name: Value" whenever the array key is itself
+     * the header name; pass indexed string entries through unchanged.
+     *
+     * @param int|string $headerName The array key -- a header name for an
+     *   associative entry, or a plain int index for an already-formatted string.
+     * @param string $header The array value -- either the header's value
+     *   (associative entry) or the full "Name: Value" string (indexed entry).
+     * @return string A valid "Name: Value" header line.
+     */
+    public static function formatHeaderLine($headerName, string $header): string
+    {
+        if (is_string($headerName) && $headerName !== "") {
+            return $headerName . ": " . $header;
+        }
+        return $header;
+    }
+
+    /**
+     * Whether an empty response body should be replaced by a rendered error
+     * template. Only genuine error codes (>= 400) have a meaningful error
+     * template to fall back to -- a 2xx/3xx response (e.g. a 302 redirect, a
+     * 204 No Content) can have an intentionally empty body, which must be
+     * left alone rather than silently replaced by error-page HTML.
+     *
+     * @param string $content The router response's raw content.
+     * @param int $httpCode The router response's HTTP status code.
+     * @return bool
+     */
+    public static function shouldRenderErrorTemplate(string $content, int $httpCode): bool
+    {
+        return $content === "" && $httpCode >= 400;
     }
 }
