@@ -592,21 +592,30 @@ if (!$alreadyLoaded) {
             // itself, it was reflecting over every declared class/function for every file just to
             // test getFileName() match.
             $routeDiscoveryFiles = [];
-            $routeDiscoverySignatureParts = [];
             foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($routeFolder)) as $file) {
                 if ($file->getExtension() !== 'php') continue;
 
-                $realPath = $file->getRealPath();
-                $routeDiscoveryFiles[] = $realPath;
-                //mtime (not content hash) so the signature stays cheap to compute on every
-                //request - identical trade-off to how OPcache/Composer detect changed files.
-                $routeDiscoverySignatureParts[] = $realPath . ':' . $file->getMTime();
+                $routeDiscoveryFiles[] = $file->getRealPath();
             }
-            //Sort a copy of the signature only - iteration order for require_once below doesn't
-            //affect correctness (route registration order only depends on attribute scan order
-            //per file), but an unsorted, filesystem-order-dependent signature would cause spurious
-            //cache misses across platforms/reruns where directory order isn't guaranteed stable.
-            sort($routeDiscoverySignatureParts);
+            //RecursiveDirectoryIterator's order is filesystem-dependent, not alphabetical, and can
+            //differ across platforms/reruns/deploys for the exact same file set. Sorting the file
+            //list itself (not just the cache signature) makes that order deterministic and, just as
+            //importantly, makes it something a developer can reason about and control by filename -
+            //plain Get::add()/Post::add()/etc calls execute immediately when their file is
+            //require_once'd below, so for that (non-attribute) style, cross-file scan order directly
+            //determines Tina4's first-match-wins route priority. A real app hit this: splitting one
+            //large route file into several smaller ones (each still correct in isolation) changed
+            //the winner between a literal route and an unrelated wildcard route that used to be
+            //registered later in the same file, purely because the two pieces landed in different
+            //files and the unsorted scan happened to require the wildcard's file first.
+            sort($routeDiscoveryFiles);
+            //mtime (not content hash) so the signature stays cheap to compute on every request -
+            //identical trade-off to how OPcache/Composer detect changed files. Derived from the
+            //now-sorted file list so the signature and the require order can never disagree.
+            $routeDiscoverySignatureParts = array_map(
+                fn($path) => $path . ':' . filemtime($path),
+                $routeDiscoveryFiles
+            );
             $routeDiscoveryCacheKey = "tina4_route_discovery_" . hash('sha256', implode('|', $routeDiscoverySignatureParts));
 
             //Debug mode always rescans and never trusts/writes the cache - exactly like Twig
