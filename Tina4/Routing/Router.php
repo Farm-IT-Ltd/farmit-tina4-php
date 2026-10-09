@@ -41,7 +41,17 @@ class Router extends Data
     final public function addCORS($headers) {
         if (defined("TINA4_ALLOW_ORIGINS")) {
             if (is_array(TINA4_ALLOW_ORIGINS)) {
-                $headers[] = ('Access-Control-Allow-Origin: ' . implode(",", TINA4_ALLOW_ORIGINS));
+                if (in_array("*", TINA4_ALLOW_ORIGINS, true)) {
+                    // Wildcard origin: browsers reject credentials with "*", so never send them
+                    $headers[] = ('Access-Control-Allow-Origin: *');
+                } else {
+                    // Explicit list: reflect only the single matching request origin (exact match)
+                    $requestOrigin = $_SERVER["HTTP_ORIGIN"] ?? "";
+                    if ($requestOrigin !== "" && in_array($requestOrigin, TINA4_ALLOW_ORIGINS, true)) {
+                        $headers[] = ('Access-Control-Allow-Origin: ' . $requestOrigin);
+                        $headers[] = ('Access-Control-Allow-Credentials: true');
+                    }
+                }
             } else {
                 echo "TINA4_ALLOW_ORIGNS must be declared as an array! Example: <pre>TINA4_ALLOW_ORIGINS=['*']</pre>";
                 \Tina4\Debug::message("TINA4_ALLOW_ORIGINS must be an array!" , TINA4_LOG_ERROR);
@@ -52,7 +62,6 @@ class Router extends Data
         $headers[] = ('Vary: Origin');
         $headers[] = ('Access-Control-Allow-Methods: GET, PUT, POST, PATCH, DELETE, OPTIONS');
         $headers[] = ('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
-        $headers[] = ('Access-Control-Allow-Credentials: True');
 
         return $headers;
     }
