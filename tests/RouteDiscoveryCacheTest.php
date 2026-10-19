@@ -350,4 +350,54 @@ PHP
             'TINA4_DEBUG=true must bypass the route-discovery cache by default, with no override needed.'
         );
     }
+
+    /**
+     * Regression test for a real production incident: a large route file was split into several
+     * smaller ones, each still correct in isolation. One successor file registered a literal route
+     * via a plain Get::add() call; another registered a wildcard route that structurally matched the
+     * same URL shape. Tina4 is first-match-wins, and plain Get::add()/Post::add()/etc calls execute
+     * immediately when their file is require_once'd - so which one wins depends entirely on file
+     * scan order. In the original single file this was never a problem because source order was
+     * always deterministic top-to-bottom; once split, RecursiveDirectoryIterator's order (confirmed
+     * in production to NOT be alphabetical) let the wildcard's file win the race, and the literal
+     * admin route silently 404'd.
+     *
+     * A behavioural test asserting "route A registers before route B" would only catch this on a
+     * filesystem/run where the natural (unsorted) iteration order happens to disagree with
+     * alphabetical order for these specific two files - not guaranteed, and not portable (an
+     * earlier version of this test using exactly 2 files passed even against the unfixed code, on
+     * this very machine, because iteration order coincidentally matched alphabetical for that small
+     * a set). This instead records each fixture file's REQUIRE order directly via a side-channel
+     * global, using enough files (10, alphabetically interleaved so no accidental subsequence could
+     * pass by chance) that a real assertion on sortedness is possible regardless of what the
+     * underlying filesystem's natural order happens to be on any given run.
+     */
+    public function testFileRequireOrderIsAlphabeticallySortedRegardlessOfDiskCreationOrder(): void
+    {
+        $GLOBALS['__tina4RouteDiscoveryOrderProbe'] = [];
+
+        // Named so alphabetical order (c, e, g, i, j, l, n, p, r, t) differs from every rotation of
+        // creation order below; written to disk in a shuffled order distinct from both.
+        $names = ['t', 'c', 'p', 'e', 'r', 'g', 'l', 'i', 'n', 'j'];
+        foreach ($names as $letter) {
+            file_put_contents(
+                $this->fixtureDir . '/' . $letter . '_probe_' . $this->suffix . '.php',
+                '<?php $GLOBALS[\'__tina4RouteDiscoveryOrderProbe\'][] = \'' . $letter . '\';'
+            );
+        }
+
+        tina4DiscoverRoutes($this->fixtureDir, true);
+
+        $expected = $names;
+        sort($expected);
+
+        $this->assertSame(
+            $expected,
+            $GLOBALS['__tina4RouteDiscoveryOrderProbe'],
+            'tina4DiscoverRoutes() must require_once discovered files in sorted (alphabetical path) ' .
+            'order, not whatever order RecursiveDirectoryIterator happens to return them in - ' .
+            'otherwise route registration order (and therefore first-match-wins routing priority ' .
+            'across files) is filesystem-dependent and effectively undefined.'
+        );
+    }
 }
