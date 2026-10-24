@@ -37,10 +37,10 @@
         }
     },
     "require": {
-        "psr/log": "^1.1.4",
+        "psr/log": "^1.1.4||^2.0||^3.0",
         "nowakowskir/php-jwt": "^2.0.1",
         "twig/twig": "^3.3.8",
-        "phpfastcache/phpfastcache": "^8.0.5",
+        "phpfastcache/phpfastcache": "^9.2",
         "coyl/git": "^0.1.7",
         "scssphp/scssphp": "^2.0.1",
         "tina4stack/tina4php-debug": "^2.0",
